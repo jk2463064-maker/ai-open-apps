@@ -1,0 +1,14 @@
+{
+  "expo": {
+    "name": "AI Open Apps",
+    "slug": "ai-open-apps",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "resizeMode": "contain",
+      "backgroundColor": "#0f172a"
+    },
+    "assetBundlePatterns": ["**/*"]
+  }
+}
