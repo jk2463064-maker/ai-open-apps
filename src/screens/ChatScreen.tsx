@@ -11,12 +11,13 @@ import {
   View,
 } from 'react-native';
 import { MessageBubble } from '../components/MessageBubble';
+import { VoiceRecorderUI } from '../hooks/useVoiceRecorder';
 import type { ChatMessage } from '../types/chat';
 
 const initialMessage: ChatMessage = {
   id: 'welcome',
   role: 'assistant',
-  content: 'Hi! I’m your AI assistant. What would you like to explore?',
+  content: 'Hi! I'm your AI assistant. What would you like to explore?',
   createdAt: Date.now(),
 };
 
@@ -28,12 +29,13 @@ const quickPrompts = [
 ];
 
 function getAssistantReply(prompt: string): string {
-  return `I received: “${prompt}”. Connect this function to your AI backend to enable real responses.`;
+  return `I received: "${prompt}". Connect this function to your AI backend to enable real responses.`;
 }
 
 export function ChatScreen() {
   const [messages, setMessages] = useState<ChatMessage[]>([initialMessage]);
   const [draft, setDraft] = useState('');
+  const [isRecording, setIsRecording] = useState(false);
 
   function sendMessage(contentOverride?: string) {
     const content = (contentOverride ?? draft).trim();
@@ -55,6 +57,11 @@ export function ChatScreen() {
     setMessages((current) => [...current, userMessage, assistantMessage]);
     setDraft('');
   }
+
+  const handleVoiceTranscribed = (transcript: string) => {
+    setIsRecording(false);
+    sendMessage(transcript);
+  };
 
   return (
     <KeyboardAvoidingView
@@ -78,18 +85,20 @@ export function ChatScreen() {
         </View>
       </View>
 
-      <View style={styles.promptRow}>
-        {quickPrompts.map((prompt) => (
-          <TouchableOpacity
-            key={prompt}
-            onPress={() => sendMessage(prompt)}
-            style={styles.promptChip}
-            activeOpacity={0.8}
-          >
-            <Text style={styles.promptText}>{prompt}</Text>
-          </TouchableOpacity>
-        ))}
-      </View>
+      {!isRecording && (
+        <View style={styles.promptRow}>
+          {quickPrompts.map((prompt) => (
+            <TouchableOpacity
+              key={prompt}
+              onPress={() => sendMessage(prompt)}
+              style={styles.promptChip}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.promptText}>{prompt}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      )}
 
       <FlatList
         contentContainerStyle={styles.messages}
@@ -99,28 +108,39 @@ export function ChatScreen() {
         showsVerticalScrollIndicator={false}
       />
 
-      <View style={styles.composerWrap}>
-        <View style={styles.composer}>
-          <TextInput
-            value={draft}
-            onChangeText={setDraft}
-            onSubmitEditing={() => sendMessage()}
-            placeholder="Type your message..."
-            placeholderTextColor="#94a3b8"
-            style={styles.input}
-            multiline
-            maxLength={2000}
-          />
-          <TouchableOpacity
-            accessibilityLabel="Send message"
-            onPress={() => sendMessage()}
-            style={[styles.sendButton, !draft.trim() && styles.disabledButton]}
-            disabled={!draft.trim()}
-          >
-            <Ionicons name="arrow-up" size={20} color="#ffffff" />
-          </TouchableOpacity>
+      {isRecording && <VoiceRecorderUI onTranscribed={handleVoiceTranscribed} />}
+
+      {!isRecording && (
+        <View style={styles.composerWrap}>
+          <View style={styles.composer}>
+            <TextInput
+              value={draft}
+              onChangeText={setDraft}
+              onSubmitEditing={() => sendMessage()}
+              placeholder="Type your message..."
+              placeholderTextColor="#94a3b8"
+              style={styles.input}
+              multiline
+              maxLength={2000}
+            />
+            <TouchableOpacity
+              accessibilityLabel="Voice input"
+              onPress={() => setIsRecording(true)}
+              style={styles.micButton}
+            >
+              <Ionicons name="mic" size={20} color="#60a5fa" />
+            </TouchableOpacity>
+            <TouchableOpacity
+              accessibilityLabel="Send message"
+              onPress={() => sendMessage()}
+              style={[styles.sendButton, !draft.trim() && styles.disabledButton]}
+              disabled={!draft.trim()}
+            >
+              <Ionicons name="arrow-up" size={20} color="#ffffff" />
+            </TouchableOpacity>
+          </View>
         </View>
-      </View>
+      )}
     </KeyboardAvoidingView>
   );
 }
@@ -248,6 +268,14 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#334155',
   },
+  micButton: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'transparent',
+  },
   sendButton: {
     width: 46,
     height: 46,
@@ -265,4 +293,3 @@ const styles = StyleSheet.create({
     opacity: 0.45,
   },
 });
-
