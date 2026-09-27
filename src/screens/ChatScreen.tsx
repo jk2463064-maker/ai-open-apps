@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   FlatList,
   KeyboardAvoidingView,
@@ -11,13 +11,14 @@ import {
   View,
 } from 'react-native';
 import { MessageBubble } from '../components/MessageBubble';
-import { VoiceRecorderUI } from '../hooks/useVoiceRecorder';
+import { useAudioRecorder } from '../hooks/useAudioRecorder';
+import { initializeTranscription, transcribeAudio } from '../services/transcriptionService';
 import type { ChatMessage } from '../types/chat';
 
 const initialMessage: ChatMessage = {
   id: 'welcome',
   role: 'assistant',
-  content: 'Hi! I'm your AI assistant. What would you like to explore?',
+  content: 'Hi! I\'m your AI assistant. What would you like to explore?',
   createdAt: Date.now(),
 };
 
@@ -36,6 +37,32 @@ export function ChatScreen() {
   const [messages, setMessages] = useState<ChatMessage[]>([initialMessage]);
   const [draft, setDraft] = useState('');
   const [isRecording, setIsRecording] = useState(false);
+  const [transcriptionError, setTranscriptionError] = useState<string | null>(null);
+  const { state, duration, startRecording, stopRecording, cancel, error } = useAudioRecorder();
+
+  useEffect(() => {
+    // Initialize transcription service on app load
+    // Replace with your actual API key - DO NOT hardcode in production!
+    const provider = (process.env.EXPO_PUBLIC_TRANSCRIPTION_PROVIDER || 'openai') as
+      | 'google'
+      | 'openai'
+      | 'assemblyai';
+    const apiKey = process.env.EXPO_PUBLIC_TRANSCRIPTION_API_KEY;
+
+    if (apiKey) {
+      try {
+        initializeTranscription({
+          provider,
+          apiKey,
+          language: 'en-US',
+        });
+      } catch (err) {
+        setTranscriptionError(
+          err instanceof Error ? err.message : 'Failed to initialize transcription'
+        );
+      }
+    }
+  }, []);
 
   function sendMessage(contentOverride?: string) {
     const content = (contentOverride ?? draft).trim();
@@ -58,9 +85,45 @@ export function ChatScreen() {
     setDraft('');
   }
 
-  const handleVoiceTranscribed = (transcript: string) => {
+  const handleMicPress = async () => {
+    if (state === 'idle') {
+      setIsRecording(true);
+      await startRecording();
+    }
+  };
+
+  const handleStopRecording = async () => {
+    const audioUri = await stopRecording();
     setIsRecording(false);
-    sendMessage(transcript);
+
+    if (!audioUri) {
+      setTranscriptionError('Failed to record audio');
+      return;
+    }
+
+    try {
+      const result = await transcribeAudio(audioUri);
+      if (result.success) {
+        sendMessage(result.text);
+      } else {
+        setTranscriptionError(result.error || 'Failed to transcribe audio');
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Transcription failed';
+      setTranscriptionError(message);
+    }
+  };
+
+  const handleCancel = () => {
+    cancel();
+    setIsRecording(false);
+    setTranscriptionError(null);
+  };
+
+  const formatDuration = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
   return (
@@ -100,6 +163,16 @@ export function ChatScreen() {
         </View>
       )}
 
+      {transcriptionError && (
+        <View style={styles.errorBar}>
+          <Ionicons name="alert-circle" size={16} color="#ef4444" />
+          <Text style={styles.errorText}>{transcriptionError}</Text>
+          <TouchableOpacity onPress={() => setTranscriptionError(null)}>
+            <Ionicons name="close" size={16} color="#ef4444" />
+          </TouchableOpacity>
+        </View>
+      )}
+
       <FlatList
         contentContainerStyle={styles.messages}
         data={messages}
@@ -108,7 +181,24 @@ export function ChatScreen() {
         showsVerticalScrollIndicator={false}
       />
 
-      {isRecording && <VoiceRecorderUI onTranscribed={handleVoiceTranscribed} />}
+      {isRecording && (
+        <View style={styles.recordingPanel}>
+          <View style={styles.recordingBar}>
+            <View style={styles.recordingIndicator} />
+            <Text style={styles.recordingText}>Recording</Text>
+            <Text style={styles.durationText}>{formatDuration(duration)}</Text>
+          </View>
+          <View style={styles.recordingActions}>
+            <TouchableOpacity onPress={handleCancel} style={styles.recordingCancelBtn}>
+              <Text style={styles.recordingActionText}>Cancel</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={handleStopRecording} style={styles.recordingSendBtn}>
+              <Ionicons name="checkmark" size={20} color="#ffffff" />
+              <Text style={styles.recordingActionText}>Send</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
 
       {!isRecording && (
         <View style={styles.composerWrap}>
@@ -125,7 +215,7 @@ export function ChatScreen() {
             />
             <TouchableOpacity
               accessibilityLabel="Voice input"
-              onPress={() => setIsRecording(true)}
+              onPress={handleMicPress}
               style={styles.micButton}
             >
               <Ionicons name="mic" size={20} color="#60a5fa" />
@@ -229,10 +319,101 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
   },
+  errorBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: 'rgba(239, 68, 68, 0.1)',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    marginTop: 8,
+    marginBottom: 8,
+    borderLeftWidth: 3,
+    borderLeftColor: '#ef4444',
+  },
+  errorText: {
+    flex: 1,
+    color: '#fca5a5',
+    fontSize: 12,
+    fontWeight: '500',
+  },
   messages: {
     paddingVertical: 12,
     paddingHorizontal: 6,
     paddingBottom: 24,
+  },
+  recordingPanel: {
+    position: 'absolute',
+    left: 16,
+    right: 16,
+    bottom: 18,
+    backgroundColor: 'rgba(15, 23, 42, 0.96)',
+    borderRadius: 24,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#334155',
+    shadowColor: '#000',
+    shadowOpacity: 0.28,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 12,
+  },
+  recordingBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#1e293b',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#334155',
+  },
+  recordingIndicator: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: '#ef4444',
+    marginRight: 12,
+  },
+  recordingText: {
+    flex: 1,
+    color: '#f8fafc',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  durationText: {
+    color: '#94a3b8',
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  recordingActions: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  recordingCancelBtn: {
+    flex: 1,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#334155',
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  recordingSendBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    borderRadius: 12,
+    backgroundColor: '#2563eb',
+    paddingVertical: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  recordingActionText: {
+    color: '#f8fafc',
+    fontSize: 14,
+    fontWeight: '600',
   },
   composerWrap: {
     position: 'absolute',
